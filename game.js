@@ -1,6 +1,7 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
+const dpad = document.getElementById('dpad');
 
 const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
@@ -167,6 +168,8 @@ const state = {
   floors: [],
   player: null,
   keysDown: new Set(),
+  touchDirections: new Set(),
+  isTouchDevice: false,
   gameStatus: 'loading',
   timeRemaining: FLOOR_TIME_LIMIT,
   lastFrameTime: 0,
@@ -1145,6 +1148,19 @@ function getInputVector() {
     vertical -= 1;
   }
   if (INPUT.down.some((key) => state.keysDown.has(key))) {
+    vertical += 1;
+  }
+
+  if (state.touchDirections.has('left')) {
+    horizontal -= 1;
+  }
+  if (state.touchDirections.has('right')) {
+    horizontal += 1;
+  }
+  if (state.touchDirections.has('up')) {
+    vertical -= 1;
+  }
+  if (state.touchDirections.has('down')) {
     vertical += 1;
   }
 
@@ -2774,7 +2790,7 @@ function drawOverlay() {
         : 'GAME OVER - Caught by the dolls';
     ctx.fillText(gameOverText, WIDTH / 2, HEIGHT / 2 - 16);
     ctx.font = '18px Trebuchet MS';
-    ctx.fillText('Press SPACEBAR to Retry', WIDTH / 2, HEIGHT / 2 + 22);
+    ctx.fillText(state.isTouchDevice ? 'Tap the screen to Retry' : 'Press SPACEBAR to Retry', WIDTH / 2, HEIGHT / 2 + 22);
   }
 
   if (state.gameStatus === 'victory') {
@@ -2786,7 +2802,7 @@ function drawOverlay() {
     ctx.font = 'bold 34px Trebuchet MS';
     ctx.fillText('VICTORY - You escaped Doll House', WIDTH / 2, HEIGHT / 2 - 18);
     ctx.font = '18px Trebuchet MS';
-    ctx.fillText('Press SPACEBAR to brave the mansion again.', WIDTH / 2, HEIGHT / 2 + 24);
+    ctx.fillText(state.isTouchDevice ? 'Tap the screen to brave the mansion again.' : 'Press SPACEBAR to brave the mansion again.', WIDTH / 2, HEIGHT / 2 + 24);
   }
 
   if (state.gameStatus === 'instructions') {
@@ -2805,14 +2821,14 @@ function drawOverlay() {
 
     ctx.fillStyle = '#d7e3f7';
     ctx.font = '18px Trebuchet MS';
-    ctx.fillText('1. Move with Arrow Keys or W A S D.', WIDTH / 2, 172);
+    ctx.fillText(state.isTouchDevice ? '1. Move with the on-screen D-Pad.' : '1. Move with Arrow Keys or W A S D.', WIDTH / 2, 172);
     ctx.fillText('2. Find the key, then reach the exit door before time runs out.', WIDTH / 2, 208);
     ctx.fillText('3. Avoid ghosts, hazards, and the boss laser on Floor 1.', WIDTH / 2, 244);
     ctx.fillText('4. If you get caught, the run restarts from the beginning.', WIDTH / 2, 280);
 
     ctx.fillStyle = '#f4d77d';
     ctx.font = 'bold 20px Trebuchet MS';
-    ctx.fillText('Press ENTER to start immediately', WIDTH / 2, HEIGHT - 108);
+    ctx.fillText(state.isTouchDevice ? 'Tap to start immediately' : 'Press ENTER to start immediately', WIDTH / 2, HEIGHT - 108);
 
     ctx.fillStyle = '#9cb0cc';
     ctx.font = '16px Trebuchet MS';
@@ -2915,6 +2931,73 @@ window.addEventListener('keyup', (event) => {
   state.keysDown.delete(event.code);
 });
 
+canvas.addEventListener('pointerdown', (event) => {
+  if (state.gameStatus === 'instructions' && state.isTouchDevice) {
+    event.preventDefault();
+    startFloor(0);
+    return;
+  }
+
+  if (state.gameStatus === 'gameover' || state.gameStatus === 'victory') {
+    event.preventDefault();
+    initGame();
+  }
+});
+
+function isTouchOnlyDevice() {
+  const touchPoints = navigator.maxTouchPoints || 0;
+  const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const mobileUserAgent = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const ipadDesktopMode = /Macintosh/i.test(navigator.userAgent) && touchPoints > 1;
+  const mobileUserAgentData = navigator.userAgentData?.mobile === true;
+
+  return touchPoints > 0 && coarsePointer && (mobileUserAgent || ipadDesktopMode || mobileUserAgentData);
+}
+
+function clearTouchDirection(button) {
+  const direction = button.dataset.direction;
+  state.touchDirections.delete(direction);
+  button.classList.remove('pressed');
+}
+
+function setupTouchControls() {
+  if (!dpad || !isTouchOnlyDevice()) {
+    return;
+  }
+
+  state.isTouchDevice = true;
+  dpad.classList.add('visible');
+  document.body.classList.add('touch-controls');
+
+  dpad.querySelectorAll('.dpad-button').forEach((button) => {
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      button.setPointerCapture(event.pointerId);
+      state.touchDirections.add(button.dataset.direction);
+      button.classList.add('pressed');
+
+      if (state.gameStatus === 'instructions') {
+        startFloor(0);
+      }
+    });
+
+    button.addEventListener('pointerup', (event) => {
+      event.preventDefault();
+      clearTouchDirection(button);
+    });
+    button.addEventListener('pointercancel', () => clearTouchDirection(button));
+    button.addEventListener('lostpointercapture', () => clearTouchDirection(button));
+  });
+}
+
+window.addEventListener('blur', () => {
+  state.keysDown.clear();
+  state.touchDirections.clear();
+  dpad?.querySelectorAll('.dpad-button.pressed').forEach((button) => {
+    button.classList.remove('pressed');
+  });
+});
+
 async function bootstrap() {
   try {
     await loadAssets();
@@ -2926,5 +3009,6 @@ async function bootstrap() {
   }
 }
 
+setupTouchControls();
 bootstrap();
 requestAnimationFrame(gameLoop);
